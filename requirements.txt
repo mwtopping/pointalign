@@ -1,4 +1,7 @@
 numpy
+tqdm
 matplotlib
 scipy
 opencv-python
+scikit-learn
+astropy
