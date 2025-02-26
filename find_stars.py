@@ -1,8 +1,10 @@
 import time
 import cv2 as cv
 import numpy as np
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from scipy import sparse
 
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
@@ -98,13 +100,10 @@ def fit_gaussian_2d(image):
 
 
 def get_noise_level(img):
-
-
     return np.nanstd(img)
 
 
-
-def get_star_locs(fname, sigma=10, return_image=False):
+def get_star_locs(fname, sigma=10, return_image=False, padding=1):
     starttime = time.time()
 
     img = fits.getdata(fname)
@@ -118,18 +117,17 @@ def get_star_locs(fname, sigma=10, return_image=False):
     masked_img[masked_img < sigma*noise] = 0
     masked_img[masked_img > 0] = 1
 
-#    ax[0].imshow(img, cmap='Greys_r', vmin=limits[0], vmax=50000, origin='lower')
     labels_img = cv.threshold(masked_img, 0, 1, cv.THRESH_BINARY)[1]
     num_labels, labels_img = cv.connectedComponents(masked_img.astype(np.int8), connectivity=4)
-#    ax[1].imshow(labels_img)
-
 
     stars = {}
-    padding = 1
+
+    coo = sparse.coo_matrix(labels_img)
 
     # go through each of the new labels
-    for ii in range(1, num_labels):
-        xinds, yinds = np.where(labels_img == ii)
+    for ii in tqdm(range(1, num_labels)):
+        this_coo = (coo==ii).tocoo()
+        xinds, yinds = this_coo.row, this_coo.col
 
         if len(xinds) <= 8:
             continue
@@ -153,10 +151,6 @@ def get_star_locs(fname, sigma=10, return_image=False):
 
     num_stars = len(stars)
 
-#    fig2, axs = plt.subplots(int(np.sqrt(num_stars)), 
-#                            int(num_stars/int(np.sqrt(num_stars)))+1)
-
-
     finalxs = []
     finalys = []
 
@@ -166,14 +160,12 @@ def get_star_locs(fname, sigma=10, return_image=False):
         width  = stars[ii][2]
         height = stars[ii][3]
 
-
         cutout = img[left:left+width, bottom:bottom+height]
 
         popt, pcov = fit_gaussian_2d(cutout)
         x = popt[1]
         y = popt[2]
-#        axs.flatten()[inum].imshow(cutout)
-#        ax[0].scatter(bottom+x, left+y, color='red',marker='+', alpha=0.9)
+
         finalxs.append(float(bottom+x))
         finalys.append(float(left+y))
 
@@ -188,8 +180,8 @@ def get_star_locs(fname, sigma=10, return_image=False):
 
 
 if __name__ == "__main__":
-    xs, ys = get_star_locs('./test_data/0001.fit')
-    xs2, ys2 = get_star_locs('./test_data/0015.fit')
+    xs, ys, img = get_star_locs('./test_data/0001.fit')
+    xs2, ys2, img2 = get_star_locs('./test_data/0015.fit')
 
     print(len(xs), len(xs2))
     plt.show()

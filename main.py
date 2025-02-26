@@ -1,3 +1,5 @@
+import time
+from glob import glob
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
@@ -11,12 +13,15 @@ from astropy.visualization import ZScaleInterval
 
 
 
-
+# currently unused
 def transform_points(rot, shift, points, recenter=False):
 
     if recenter:
         mean = np.mean(points, axis=0)
         points -= mean
+    else:
+        mean = 0
+
 
     ones = np.ones(np.shape(points)[0])
     points = np.column_stack((points, ones))
@@ -30,20 +35,6 @@ def transform_points(rot, shift, points, recenter=False):
     return outpoints 
 
 
-# generate some random data
-#xs = np.random.uniform(0, 1, size=nstars)
-#ys = np.random.uniform(0, 1, size=nstars)
-
-
-#shuffle_inds = np.random.choice(range(nstars), size=nstars, replace=False)
-
-#xs_shift = xs[shuffle_inds] + 0.05
-#ys_shift = ys[shuffle_inds] + 0.08
-
-#temp_points = np.column_stack((xs[shuffle_inds].copy(), ys[shuffle_inds].copy()))
-#shifted_points = np.array(transform_points(0.1, [0.00, 0.00], temp_points, recenter=True))
-#xs_shift = shifted_points[:,0]
-#ys_shift = shifted_points[:,1]
 
 def get_angles(xs, ys):
 
@@ -67,6 +58,8 @@ def get_all_tris(ids):
     perms = list(itertools.combinations(ids, 3))
     return perms
 
+
+
 def match_angles(angles1, angles2):
     # get first two angles of each list
     #  angles are sorted, so this is smallest 2 angles
@@ -80,10 +73,10 @@ def match_angles(angles1, angles2):
 
     return dists, inds
 
-    
-def get_all_angles(xs, ys):
+
+
+def get_all_angles(xs, ys, N=4):
     allperms = set()
-    N=4
     for ii in tqdm(range(len(xs))):
         dists = (xs-xs[ii])**2 + (ys-ys[ii])**2
         closest = np.argsort(dists).tolist()[:N+1]
@@ -104,11 +97,19 @@ def get_all_angles(xs, ys):
 
 
 
-def get_frame_transform(ref_fname, target_fname):
-    xs, ys, img1 = get_star_locs(target_fname, return_image=True)
-    xs_shift, ys_shift, img2 = get_star_locs(ref_fname, return_image=True)
+def get_frame_transform(ref_fname, target_fname, ref_data = None, target_data = None):
+    if ref_data is not None:
+        xs, ys, img1 = ref_data
+    else:
+        xs, ys, img1 = get_star_locs(target_fname, return_image=True)
+
+    if target_data is not None:
+        xs_shift, ys_shift, img2 = target_data
+    else:
+        xs_shift, ys_shift, img2 = get_star_locs(ref_fname, return_image=True)
 
 
+    starttime = time.time()
     angles, pos = get_all_angles(xs, ys)
     angles_shift, pos_shift = get_all_angles(xs_shift, ys_shift)
 
@@ -134,47 +135,54 @@ def get_frame_transform(ref_fname, target_fname):
 
 
 
-
+    # estimate transformation matrix here
     H, inpts = cv.estimateAffinePartial2D(np.array(all_refs),
                                           np.array(all_targs),
                                           ransacReprojThreshold=3.0)
 
-
-    ones = np.ones(np.shape(all_refs)[0])
-    points = np.column_stack((all_refs, ones))
-
-
-
-    newpoints = np.matrix(points) * H.T
-#    [ax.scatter(p[0], p[1], color='black', linewidths=2, facecolor='none') for p in np.array(newpoints)]
-    print(H)
-    print("Number of inliers: ", len(inpts))
-    print(len(newpoints))
-
-
-
-
-
-    scaler = ZScaleInterval()
-    finalimg = img1+img2
-    limits = scaler.get_limits(finalimg)
-
-    fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
-    axs[0].imshow(finalimg, vmin=limits[0], vmax=limits[1], cmap='Greys_r', origin='lower')
-
+    # transform the points here
     outshape = (np.shape(img2)[1], np.shape(img2)[0])
-
     transformed1 = cv.warpAffine(img1, H, outshape)
 
 
-    axs[1].imshow(transformed1+img2, vmin=limits[0], vmax=limits[1], cmap='Greys_r', origin='lower')
-
+    print(f"Finished finding best transform in {time.time()-starttime:.2f}sec")
+    return transformed1
 
 
 if __name__ == "__main__":
+    starttime = time.time()
     ref_fname = "./test_data/0001.fit"
     target_fname = "./test_data/0015.fit"
-    get_frame_transform(ref_fname, target_fname)
+    fnames = glob("./test_data/*fit")
+    final_images = None
+    ref_fname = fnames[0]
+    ref_xs, ref_ys, ref_image = get_star_locs(ref_fname, return_image=True)
+    final_images = ref_image.copy()
+
+    for target_fname in fnames[1:]:
+        transformed = get_frame_transform(ref_fname, target_fname, 
+                                          ref_data = (ref_xs, ref_ys, ref_image))
+        if final_images is None:
+            final_images = transformed
+            ref_image = transformed
+        else:
+            final_images = np.dstack((final_images, transformed))
+        print(np.shape(final_images))
+
+    print(f"Stacking done in {time.time()-starttime:.2f}seconds")
+    fig, axs = plt.subplots(1, 2, sharex=True, sharey=True)
+
+
+    scaler = ZScaleInterval()
+    limits = scaler.get_limits(ref_image)
+
+    axs[0].imshow(ref_image, vmin=limits[0], vmax=limits[1], cmap='Greys_r', origin='lower')
+
+    final_image = np.nanmedian(final_images, axis=2)
+    limits = scaler.get_limits(final_image)
+    axs[1].imshow(final_image, vmin=limits[0], vmax=limits[1], cmap='Greys_r', origin='lower')
+
+
 
     plt.show()
     
