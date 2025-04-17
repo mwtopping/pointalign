@@ -142,7 +142,7 @@ def get_star_locs(fname, sigma=10, return_image=False, padding=1):
 
         if np.any(cutout >= 2**16-1):
             continue
-        
+
         stars[ii] = (left-padding,
                      bottom-padding,
                      width+2*padding,
